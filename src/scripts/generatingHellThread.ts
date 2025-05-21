@@ -7,6 +7,12 @@ const main = async () => {
 		explicitRelayUrls: [
 			'wss://relay.damus.io',
 			'wss://nos.lol',
+			'wss://relay.nostr.band',
+			'wss://relay.current.fyi',
+			'wss://nostr.fmt.wiz.biz',
+			'wss://relay.snort.social',
+			'wss://eden.nostr.land',
+			'wss://purplepag.es'
 		],
 		enableOutboxModel: false, // Disable outbox to speed up publishing
 		autoConnectUserRelays: false, // Don't auto-connect to user relays
