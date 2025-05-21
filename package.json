@@ -13,5 +13,10 @@
     "@types/node": "^22.15.21",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@noble/secp256k1": "^2.2.3",
+    "@nostr-dev-kit/ndk": "^2.14.15",
+    "nostr-tools": "^2.13.0"
   }
 }
