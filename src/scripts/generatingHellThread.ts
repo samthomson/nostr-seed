@@ -7,14 +7,35 @@ interface NostrIdentity {
 }
 
 // Reduced numbers for testing
-const TOTAL_PARTICIPANTS = 3
-const TOTAL_REPLIES = 5
+const TOTAL_REPLIES = 100
+
+const getProfileImageUrl = (pubkey: string) =>
+	`https://api.dicebear.com/7.x/identicon/svg?seed=${pubkey}`
 
 const createNostrIdentity = (): NostrIdentity => {
 	const signer = NDKPrivateKeySigner.generate()
 	const user = new NDKUser({ pubkey: signer.pubkey })
 	console.log(`Created identity with pubkey: ${user.pubkey}`)
 	return { signer, user }
+}
+
+const publishProfileMetadata = async (ndk: NDK, identity: NostrIdentity, name: string) => {
+	ndk.signer = identity.signer
+	const event = new NDKEvent(ndk)
+	event.kind = 0 // Metadata event
+	event.created_at = Math.floor(Date.now() / 1000)
+	event.pubkey = identity.signer.pubkey
+	event.tags = []
+	event.content = JSON.stringify({
+		name,
+		picture: getProfileImageUrl(identity.signer.pubkey),
+		// about: 'Fake user for Nostr thread simulation.'
+	})
+	await event.sign()
+	console.log(`Publishing profile metadata for ${name} (${identity.signer.pubkey})`)
+	await event.publish()
+	// Small delay to help relays process
+	await new Promise(resolve => setTimeout(resolve, 500))
 }
 
 const createNote = async (ndk: NDK, content: string, signer: NDKPrivateKeySigner, replyTo?: NDKEvent): Promise<NDKEvent> => {
@@ -100,21 +121,58 @@ const main = async () => {
 			'wss://relay.damus.io',
 			'wss://nos.lol',
 			'wss://relay.nostr.band',
+			'wss://relay.current.fyi',
+			'wss://nostr.fmt.wiz.biz',
+			'wss://relay.snort.social',
+			'wss://eden.nostr.land',
+			'wss://purplepag.es',
+			'wss://nostr.wine',
+			'wss://nostr.mom',
+			'wss://offchain.pub',
+			'wss://nostr-pub.wellorder.net',
+			'wss://nostr.oxtr.dev'
 		],
 		enableOutboxModel: false,
 		autoConnectUserRelays: false,
 	})
 
 	try {
-		// Create participants
-		console.log(`Creating ${TOTAL_PARTICIPANTS} participants...`)
+		// Assign realistic fake names for demonstration
+		const fakeNames = [
+			"Olivia Bennett",
+			"Liam Carter",
+			"Emma Robinson",
+			"Noah Thompson",
+			"Ava Mitchell",
+			"Elijah Parker",
+			"Sophia Turner",
+			"Lucas Harris",
+			"Mia Edwards",
+			"Mason Clark",
+			"Isabella Lewis",
+			"Logan Walker",
+			"Charlotte Young",
+			"Ethan King",
+			"Amelia Wright",
+			"James Scott",
+			"Harper Green",
+			"Benjamin Baker",
+			"Evelyn Hall"
+			// Add more as needed!
+		]
+		// Create as many participants as there are names
 		const participants: NostrIdentity[] = Array.from(
-			{ length: TOTAL_PARTICIPANTS }, 
+			{ length: fakeNames.length },
 			() => createNostrIdentity()
 		)
 		
 		// Connect to relays
 		await connectToRelays(ndk)
+		
+		// Publish metadata for each participant
+		for (let i = 0; i < participants.length; i++) {
+			await publishProfileMetadata(ndk, participants[i], fakeNames[i])
+		}
 		
 		// Create and publish the top note
 		const originalPoster = participants[0]
