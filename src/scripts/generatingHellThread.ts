@@ -6,29 +6,49 @@ interface NostrIdentity {
 	user: NDKUser
 }
 
+// Reduced numbers for testing
+const TOTAL_PARTICIPANTS = 3
+const TOTAL_REPLIES = 5
+
 const createNostrIdentity = (): NostrIdentity => {
-	// Generate a new signer
 	const signer = NDKPrivateKeySigner.generate()
 	const user = new NDKUser({ pubkey: signer.pubkey })
-	
-	console.log('Generated new Nostr identity:')
-	console.log(`Private key (hex): ${signer.privateKey}`)
-	console.log(`Public key (hex): ${user.pubkey}`)
-	console.log(`Public key (npub): ${nip19.npubEncode(user.pubkey)}`)
-
+	console.log(`Created identity with pubkey: ${user.pubkey}`)
 	return { signer, user }
 }
 
-const createHelloWorldNote = (ndk: NDK): NDKEvent => {
+const createNote = async (ndk: NDK, content: string, signer: NDKPrivateKeySigner, replyTo?: NDKEvent): Promise<NDKEvent> => {
+	// Set the signer for this note
+	ndk.signer = signer
+	
 	const event = new NDKEvent(ndk)
 	event.kind = 1 // Regular note
-	event.content = 'Hello World from Nostr!'
-	event.created_at = Math.floor(Date.now() / 1000) // explicit timestamp
+	event.content = content
+	event.created_at = Math.floor(Date.now() / 1000)
+	event.pubkey = signer.pubkey
+	
+	if (replyTo) {
+		// Add proper reply tags
+		event.tags = [
+			['e', replyTo.id, '', 'root'],  // Root event reference
+			['p', replyTo.pubkey]  // Author reference
+		]
+		console.log(`Creating reply to event ${replyTo.id} by ${replyTo.pubkey}`)
+	} else {
+		event.tags = []
+	}
+
+	// Sign the event
+	await event.sign()
+	
+	// Log the raw event for debugging
+	const rawEvent = event.rawEvent()
+	console.log('\nRaw event before publishing:', JSON.stringify(rawEvent, null, 2))
+	
 	return event
 }
 
-const connectAndPublish = async (ndk: NDK, event: NDKEvent): Promise<void> => {
-	// Connect to relays with timeout
+const connectToRelays = async (ndk: NDK): Promise<void> => {
 	console.log('Connecting to relays...')
 	try {
 		const connectionPromise = ndk.connect()
@@ -40,14 +60,13 @@ const connectAndPublish = async (ndk: NDK, event: NDKEvent): Promise<void> => {
 		console.log('Connected to relays')
 	} catch (error) {
 		console.log('Warning: Some relays failed to connect:', error.message)
-		// Continue anyway as we might have connected to some relays
 	}
+}
 
-	// Sign and publish the event
+const publishEvent = async (ndk: NDK, event: NDKEvent, signer: NDKPrivateKeySigner): Promise<void> => {
 	try {
-		await event.sign()  // Sign first
-		console.log('\nEvent details before publishing:')
-		console.log(JSON.stringify(event.rawEvent(), null, 2))
+		// Ensure signer is set before publishing
+		ndk.signer = signer
 		
 		// Publish with timeout
 		const publishPromise = event.publish()
@@ -56,51 +75,85 @@ const connectAndPublish = async (ndk: NDK, event: NDKEvent): Promise<void> => {
 		)
 		
 		const published = await Promise.race([publishPromise, publishTimeoutPromise])
-		console.log('\nNote published successfully!')
-		console.log('Event ID:', event.id)
-		console.log('Event URL on nostr.band:', `https://nostr.band/event/${event.id}`)
+		const noteNip19 = nip19.noteEncode(event.id)
+		console.log(`Published note: "${event.content}"`)
+		console.log(`  Hex event ID: ${event.id}`)
+		console.log(`  NIP-19 event ID: ${noteNip19}`)
+		console.log(`  nostr: URI: nostr:${noteNip19}`)
+		console.log(`  View on nostr.band: https://nostr.band/event/${event.id}`)
 		
-		// Show which relays received the event in a cleaner way
+		// Show which relays received the event
 		const relayUrls = Array.from(published as Set<NDKRelay>).map(relay => relay.url)
-		console.log('Published to relays:', relayUrls.join(', '))
+		console.log('  Published to relays:', relayUrls.join(', '))
+		
+		// Add a delay after publishing to ensure relay processing
+		await new Promise(resolve => setTimeout(resolve, 2000))
 	} catch (error) {
 		console.error('Failed to publish note:', error.message)
-		throw error // Re-throw to be caught by main
+		throw error
 	}
 }
 
 const main = async () => {
-	// Create NDK instance with multiple relays
 	const ndk = new NDK({
 		explicitRelayUrls: [
 			'wss://relay.damus.io',
 			'wss://nos.lol',
 			'wss://relay.nostr.band',
-			'wss://relay.current.fyi',
-			'wss://nostr.fmt.wiz.biz',
-			'wss://relay.snort.social',
-			'wss://eden.nostr.land',
-			'wss://purplepag.es'
 		],
-		enableOutboxModel: false, // Disable outbox to speed up publishing
-		autoConnectUserRelays: false, // Don't auto-connect to user relays
+		enableOutboxModel: false,
+		autoConnectUserRelays: false,
 	})
 
 	try {
-		// Step 1: Create identity
-		const { signer } = createNostrIdentity()
-		ndk.signer = signer
-
-		// Step 2: Create the note
-		const event = createHelloWorldNote(ndk)
-
-		// Step 3: Connect and publish
-		await connectAndPublish(ndk, event)
+		// Create participants
+		console.log(`Creating ${TOTAL_PARTICIPANTS} participants...`)
+		const participants: NostrIdentity[] = Array.from(
+			{ length: TOTAL_PARTICIPANTS }, 
+			() => createNostrIdentity()
+		)
+		
+		// Connect to relays
+		await connectToRelays(ndk)
+		
+		// Create and publish the top note
+		const originalPoster = participants[0]
+		const topNote = await createNote(ndk, 'TOP NOTE', originalPoster.signer)
+		console.log('\nPublishing top note...')
+		await publishEvent(ndk, topNote, originalPoster.signer)
+		
+		// Create a pool of replies
+		const replyPool: { participant: NostrIdentity, replyNumber: number }[] = []
+		for (let i = 1; i <= TOTAL_REPLIES; i++) {
+			// Randomly select a participant for each reply
+			const participant = participants[Math.floor(Math.random() * participants.length)]
+			replyPool.push({ participant, replyNumber: i })
+		}
+		
+		// Publish replies with delays between them
+		console.log('\nPublishing replies...')
+		for (const { participant, replyNumber } of replyPool) {
+			const reply = await createNote(ndk, `reply ${replyNumber}`, participant.signer, topNote)
+			await publishEvent(ndk, reply, participant.signer)
+			
+			// Add a longer delay between posts (2 seconds)
+			await new Promise(resolve => setTimeout(resolve, 2000))
+		}
+		
+		console.log('\nThread creation completed!')
+		const topNoteNip19 = nip19.noteEncode(topNote.id)
+		console.log('Original post:')
+		console.log(`  Hex event ID: ${topNote.id}`)
+		console.log(`  NIP-19 event ID: ${topNoteNip19}`)
+		console.log(`  nostr: URI: nostr:${topNoteNip19}`)
+		console.log(`  View on nostr.band: https://nostr.band/event/${topNote.id}`)
+		
+		// Wait a bit before exiting to ensure all events are processed
+		await new Promise(resolve => setTimeout(resolve, 3000))
 	} catch (error) {
 		console.error('Script error:', error.message)
 		process.exit(1)
 	} finally {
-		// Force exit as the WebSocket connections might keep the process alive
 		process.exit(0)
 	}
 }
