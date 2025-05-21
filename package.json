@@ -1,0 +1,17 @@
+{
+  "name": "nostr-seed",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "repository": "git@github.com:samthomson/nostr-seed.git",
+  "author": "sam",
+  "license": "MIT",
+  "scripts": {
+    "generate-hell": "ts-node src/scripts/generatingHellThread.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}
