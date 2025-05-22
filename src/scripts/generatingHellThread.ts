@@ -139,6 +139,28 @@ const randomSentences = [
 	"Looking forward to more discussions."
 ];
 
+const createLinearThread = async (ndk: NDK, participants: NostrIdentity[], depth: number) => {
+	// Create and publish the top note
+	const originalPoster = participants[0]
+	const topNote = await createNote(ndk, 'TOP NOTE (Linear Thread)', originalPoster.signer)
+	console.log('\nPublishing top note for linear thread...')
+	await publishEvent(ndk, topNote, originalPoster.signer)
+
+	let previousNote = topNote
+	// Create and publish replies in a linear chain
+	console.log('\nPublishing linear chain of replies...')
+	for (let i = 1; i <= depth; i++) {
+		const participant = participants[Math.floor(Math.random() * participants.length)]
+		const randomSentence = randomSentences[Math.floor(Math.random() * randomSentences.length)]
+		const replyContent = `linear reply ${i}: ${randomSentence}`
+		const reply = await createNote(ndk, replyContent, participant.signer, previousNote)
+		await publishEvent(ndk, reply, participant.signer)
+		previousNote = reply
+		await new Promise(resolve => setTimeout(resolve, 2000))
+	}
+	return topNote
+}
+
 const main = async () => {
 	const ndk = new NDK({
 		explicitRelayUrls: [
@@ -209,10 +231,10 @@ const main = async () => {
 			await publishProfileMetadata(ndk, participants[i], fakeNames[i])
 		}
 		
-		// Create and publish the top note
+		// Create branching thread (many replies to top note)
 		const originalPoster = participants[0]
-		const topNote = await createNote(ndk, 'TOP NOTE', originalPoster.signer)
-		console.log('\nPublishing top note...')
+		const topNote = await createNote(ndk, 'TOP NOTE (Branching Thread)', originalPoster.signer)
+		console.log('\nPublishing top note for branching thread...')
 		await publishEvent(ndk, topNote, originalPoster.signer)
 		
 		// Track all created notes for possible reply targets
@@ -220,7 +242,7 @@ const main = async () => {
 		// Track relay rejections
 		const relayRejections: Record<string, number> = {}
 		// Create and publish replies
-		console.log('\nPublishing replies...')
+		console.log('\nPublishing branching replies...')
 		for (let i = 1; i <= TOTAL_REPLIES; i++) {
 			// Pick a participant at random
 			const participant = participants[Math.floor(Math.random() * participants.length)]
@@ -248,13 +270,25 @@ const main = async () => {
 			await new Promise(resolve => setTimeout(resolve, 2000))
 		}
 		
+		// Create linear thread
+		console.log('\nCreating linear thread...')
+		const linearTopNote = await createLinearThread(ndk, participants, 100)
+		
 		console.log('\nThread creation completed!')
+		console.log('Original branching post:')
 		const topNoteNip19 = nip19.noteEncode(topNote.id)
-		console.log('Original post:')
 		console.log(`  Hex event ID: ${topNote.id}`)
 		console.log(`  NIP-19 event ID: ${topNoteNip19}`)
 		console.log(`  nostr: URI: nostr:${topNoteNip19}`)
 		console.log(`  View on nostr.band: https://nostr.band/event/${topNote.id}`)
+
+		console.log('\nOriginal linear post:')
+		const linearTopNoteNip19 = nip19.noteEncode(linearTopNote.id)
+		console.log(`  Hex event ID: ${linearTopNote.id}`)
+		console.log(`  NIP-19 event ID: ${linearTopNoteNip19}`)
+		console.log(`  nostr: URI: nostr:${linearTopNoteNip19}`)
+		console.log(`  View on nostr.band: https://nostr.band/event/${linearTopNote.id}`)
+
 		// Print relay rejection summary
 		if (Object.keys(relayRejections).length > 0) {
 			console.log('\nRelay rejections summary:')
