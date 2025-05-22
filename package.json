@@ -15,7 +15,8 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@nostr-dev-kit/ndk": "^2.14.15",
-    "nostr-tools": "^2.13.0"
+    "@nostr-dev-kit/ndk": "^2.4.0",
+    "dotenv": "^16.4.5",
+    "nostr-tools": "^2.1.5"
   }
 }
