@@ -1,5 +1,9 @@
 import NDK, { NDKPrivateKeySigner, NDKEvent, NDKUser, NDKRelay } from '@nostr-dev-kit/ndk'
 import { nip19 } from 'nostr-tools'
+import * as dotenv from 'dotenv'
+
+// Load environment variables from .env file
+dotenv.config()
 
 interface NostrIdentity {
 	signer: NDKPrivateKeySigner
@@ -7,8 +11,9 @@ interface NostrIdentity {
 }
 
 // Reduced numbers for testing
-const TOTAL_REPLIES = 100
+const TOTAL_REPLIES = 20
 const REPLY_TO_TOP_PROB = 0.8 // 80% replies to top note
+const PUBLISH_DELAY_MS = 500
 
 const getProfileImageUrl = (pubkey: string) =>
 	`https://api.dicebear.com/7.x/identicon/svg?seed=${pubkey}`
@@ -40,32 +45,43 @@ const publishProfileMetadata = async (ndk: NDK, identity: NostrIdentity, name: s
 }
 
 const createNote = async (ndk: NDK, content: string, signer: NDKPrivateKeySigner, replyTo?: NDKEvent): Promise<NDKEvent> => {
-	// Set the signer for this note
-	ndk.signer = signer
-	
 	const event = new NDKEvent(ndk)
-	event.kind = 1 // Regular note
+	event.kind = 1
 	event.content = content
 	event.created_at = Math.floor(Date.now() / 1000)
-	event.pubkey = signer.pubkey
 	
 	if (replyTo) {
-		// Add proper reply tags
+		// Proper NIP-10 threading
 		event.tags = [
-			['e', replyTo.id, '', 'root'],  // Root event reference
-			['p', replyTo.pubkey]  // Author reference
+			['e', replyTo.id],  // Reference to immediate parent
+			['p', replyTo.pubkey]  // Reference to parent author
 		]
-		console.log(`Creating reply to event ${replyTo.id} by ${replyTo.pubkey}`)
+		
+		// Get the root event if this is a nested reply
+		const rootTag = replyTo.getMatchingTags('e').find(tag => tag[3] === 'root')
+		const parentRootTag = replyTo.tags.find(t => t[0] === 'e')
+		if (rootTag) {
+			// If parent has a root tag, use that as our root
+			event.tags.push(['e', rootTag[1], '', 'root'])
+		} else if (parentRootTag) {
+			// If parent has an e tag but no root, parent is replying to root
+			event.tags.push(['e', parentRootTag[1], '', 'root'])
+		} else {
+			// Parent is the root
+			event.tags.push(['e', replyTo.id, '', 'root'])
+		}
 	} else {
 		event.tags = []
 	}
 
-	// Sign the event
+	// Important: Set signer before signing
+	ndk.signer = signer
+	event.pubkey = signer.pubkey
 	await event.sign()
 	
-	// Log the raw event for debugging
-	const rawEvent = event.rawEvent()
-	console.log('\nRaw event before publishing:', JSON.stringify(rawEvent, null, 2))
+	// Debug log the event structure
+	console.log(`Creating note: ${content.substring(0, 30)}...`)
+	console.log(`Tags: ${JSON.stringify(event.tags)}`)
 	
 	return event
 }
@@ -87,29 +103,24 @@ const connectToRelays = async (ndk: NDK): Promise<void> => {
 
 const publishEvent = async (ndk: NDK, event: NDKEvent, signer: NDKPrivateKeySigner): Promise<void> => {
 	try {
-		// Ensure signer is set before publishing
 		ndk.signer = signer
+		const published = await event.publish()
 		
-		// Publish with timeout
-		const publishPromise = event.publish()
-		const publishTimeoutPromise = new Promise((_, reject) => 
-			setTimeout(() => reject(new Error('Publish timeout')), 5000)
-		)
+		if (!published) {
+			throw new Error('Event was not published to any relays')
+		}
 		
-		const published = await Promise.race([publishPromise, publishTimeoutPromise])
+		const relays = Array.from(published as Set<NDKRelay>)
+		if (relays.length === 0) {
+			throw new Error('Event published but no relay confirmations received')
+		}
+		
 		const noteNip19 = nip19.noteEncode(event.id)
-		console.log(`Published note: "${event.content}"`)
-		console.log(`  Hex event ID: ${event.id}`)
-		console.log(`  NIP-19 event ID: ${noteNip19}`)
-		console.log(`  nostr: URI: nostr:${noteNip19}`)
-		console.log(`  View on nostr.band: https://nostr.band/event/${event.id}`)
+		console.log(`Published ${event.kind === 1 ? 'note' : 'event'}: "${event.content.substring(0, 30)}..."`)
+		console.log(`  nostr:${noteNip19}`)
+		console.log(`  to ${relays.length} relays`)
 		
-		// Show which relays received the event
-		const relayUrls = Array.from(published as Set<NDKRelay>).map(relay => relay.url)
-		console.log('  Published to relays:', relayUrls.join(', '))
-		
-		// Add a delay after publishing to ensure relay processing
-		await new Promise(resolve => setTimeout(resolve, 2000))
+		await new Promise(resolve => setTimeout(resolve, PUBLISH_DELAY_MS))
 	} catch (error) {
 		console.error('Failed to publish note:', error.message)
 		throw error
@@ -183,7 +194,13 @@ const main = async () => {
 	})
 
 	try {
-		// Assign realistic fake names for demonstration
+		// Use provided private key or generate new one
+		const rootPrivkey = process.env.NOSTR_PRIVATE_KEY
+		const rootSigner = rootPrivkey ? 
+			new NDKPrivateKeySigner(rootPrivkey) :
+			NDKPrivateKeySigner.generate()
+		
+		// Create participants, with root signer as first participant
 		const fakeNames = [
 			"Olivia Bennett",
 			"Liam Carter",
@@ -217,11 +234,13 @@ const main = async () => {
 			"David Bailey",
 			"Layla Richardson"
 		];
-		// Create as many participants as there are names
-		const participants: NostrIdentity[] = Array.from(
-			{ length: fakeNames.length },
-			() => createNostrIdentity()
-		)
+		const participants: NostrIdentity[] = [
+			{ signer: rootSigner, user: new NDKUser({ pubkey: rootSigner.pubkey }) },
+			...Array.from(
+				{ length: fakeNames.length - 1 },
+				() => createNostrIdentity()
+			)
+		]
 		
 		// Connect to relays
 		await connectToRelays(ndk)
@@ -272,7 +291,7 @@ const main = async () => {
 		
 		// Create linear thread
 		console.log('\nCreating linear thread...')
-		const linearTopNote = await createLinearThread(ndk, participants, 100)
+		const linearTopNote = await createLinearThread(ndk, participants, 20)
 		
 		console.log('\nThread creation completed!')
 		console.log('Original branching post:')
