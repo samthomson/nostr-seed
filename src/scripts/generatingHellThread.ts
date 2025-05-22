@@ -8,6 +8,7 @@ interface NostrIdentity {
 
 // Reduced numbers for testing
 const TOTAL_REPLIES = 100
+const REPLY_TO_TOP_PROB = 0.8 // 80% replies to top note
 
 const getProfileImageUrl = (pubkey: string) =>
 	`https://api.dicebear.com/7.x/identicon/svg?seed=${pubkey}`
@@ -115,6 +116,29 @@ const publishEvent = async (ndk: NDK, event: NDKEvent, signer: NDKPrivateKeySign
 	}
 }
 
+const randomSentences = [
+	"This is really interesting!",
+	"I totally agree with you.",
+	"Can you explain more?",
+	"Thanks for sharing this.",
+	"I hadn't thought of it that way.",
+	"What do others think?",
+	"That's a great point!",
+	"I have a different perspective.",
+	"Could you provide a source?",
+	"This made my day!",
+	"I think this could be improved.",
+	"How did you come up with this?",
+	"I appreciate your insight.",
+	"This is a hot topic lately.",
+	"I learned something new today.",
+	"Can someone summarize?",
+	"I have a question about this.",
+	"This is a bit confusing.",
+	"I love this community!",
+	"Looking forward to more discussions."
+];
+
 const main = async () => {
 	const ndk = new NDK({
 		explicitRelayUrls: [
@@ -157,9 +181,20 @@ const main = async () => {
 			"James Scott",
 			"Harper Green",
 			"Benjamin Baker",
-			"Evelyn Hall"
-			// Add more as needed!
-		]
+			"Evelyn Hall",
+			"Jack Murphy",
+			"Ella Foster",
+			"William Reed",
+			"Grace Morgan",
+			"Alexander Brooks",
+			"Chloe Wood",
+			"Daniel Kelly",
+			"Sofia Price",
+			"Matthew Bell",
+			"Scarlett Cooper",
+			"David Bailey",
+			"Layla Richardson"
+		];
 		// Create as many participants as there are names
 		const participants: NostrIdentity[] = Array.from(
 			{ length: fakeNames.length },
@@ -180,21 +215,36 @@ const main = async () => {
 		console.log('\nPublishing top note...')
 		await publishEvent(ndk, topNote, originalPoster.signer)
 		
-		// Create a pool of replies
-		const replyPool: { participant: NostrIdentity, replyNumber: number }[] = []
-		for (let i = 1; i <= TOTAL_REPLIES; i++) {
-			// Randomly select a participant for each reply
-			const participant = participants[Math.floor(Math.random() * participants.length)]
-			replyPool.push({ participant, replyNumber: i })
-		}
-		
-		// Publish replies with delays between them
+		// Track all created notes for possible reply targets
+		const allNotes: NDKEvent[] = [topNote]
+		// Track relay rejections
+		const relayRejections: Record<string, number> = {}
+		// Create and publish replies
 		console.log('\nPublishing replies...')
-		for (const { participant, replyNumber } of replyPool) {
-			const reply = await createNote(ndk, `reply ${replyNumber}`, participant.signer, topNote)
-			await publishEvent(ndk, reply, participant.signer)
-			
-			// Add a longer delay between posts (2 seconds)
+		for (let i = 1; i <= TOTAL_REPLIES; i++) {
+			// Pick a participant at random
+			const participant = participants[Math.floor(Math.random() * participants.length)]
+			// Decide whether to reply to top note or a previous reply
+			let parentNote: NDKEvent
+			if (Math.random() < REPLY_TO_TOP_PROB || allNotes.length === 1) {
+				parentNote = topNote
+			} else {
+				// Pick a random previous reply as parent
+				parentNote = allNotes[Math.floor(Math.random() * (allNotes.length - 1)) + 1]
+			}
+			// Pick a random sentence
+			const randomSentence = randomSentences[Math.floor(Math.random() * randomSentences.length)]
+			const replyContent = `reply ${i}: ${randomSentence}`
+			const reply = await createNote(ndk, replyContent, participant.signer, parentNote)
+			// Publish and track rejections
+			try {
+				await publishEvent(ndk, reply, participant.signer)
+				allNotes.push(reply)
+			} catch (err) {
+				// Track relay rejections by error message
+				const msg = (err && err.message) ? err.message : 'Unknown error'
+				relayRejections[msg] = (relayRejections[msg] || 0) + 1
+			}
 			await new Promise(resolve => setTimeout(resolve, 2000))
 		}
 		
@@ -205,7 +255,13 @@ const main = async () => {
 		console.log(`  NIP-19 event ID: ${topNoteNip19}`)
 		console.log(`  nostr: URI: nostr:${topNoteNip19}`)
 		console.log(`  View on nostr.band: https://nostr.band/event/${topNote.id}`)
-		
+		// Print relay rejection summary
+		if (Object.keys(relayRejections).length > 0) {
+			console.log('\nRelay rejections summary:')
+			for (const [reason, count] of Object.entries(relayRejections)) {
+				console.log(`  ${reason}: ${count} times`)
+			}
+		}
 		// Wait a bit before exiting to ensure all events are processed
 		await new Promise(resolve => setTimeout(resolve, 3000))
 	} catch (error) {
