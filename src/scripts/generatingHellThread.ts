@@ -258,8 +258,10 @@ const main = async () => {
 		await publishEvent(ndk, topNote, originalPoster.signer)
 		
 		// B's initial reply that everyone will reply to
-		const firstReply = await createNote(ndk, 'First reply from B', participantB.signer, topNote)
+		let previousNote = topNote
+		let firstReply = await createNote(ndk, 'First reply from B', participantB.signer, previousNote)
 		await publishEvent(ndk, firstReply, participantB.signer)
+		previousNote = firstReply
 		
 		// Create and publish replies
 		console.log('\nPublishing alternating A-B replies...')
@@ -267,8 +269,9 @@ const main = async () => {
 			const participant = i % 2 === 0 ? participantB : originalPoster
 			const randomSentence = randomSentences[Math.floor(Math.random() * randomSentences.length)]
 			const replyContent = `reply ${i}: ${randomSentence}`
-			const reply = await createNote(ndk, replyContent, participant.signer, firstReply)
+			const reply = await createNote(ndk, replyContent, participant.signer, previousNote)
 			await publishEvent(ndk, reply, participant.signer)
+			previousNote = reply
 			await new Promise(resolve => setTimeout(resolve, 2000))
 		}
 		
