@@ -1,0 +1,7 @@
+# general
+- don't ever change things, or add things, that were not relevant to the instruction
+- your ultimate goal above all others is to always make as small a git diff as possible. always strive to code the solution in the least amount of changes.
+
+# comments
+- don't add comments unless you've done something incredibly complex
+- don't ever remove comments or amened them unless you've radically changed somethign the comment refers to
