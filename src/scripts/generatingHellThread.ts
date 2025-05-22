@@ -252,40 +252,23 @@ const main = async () => {
 		
 		// Create branching thread (many replies to top note)
 		const originalPoster = participants[0]
-		const topNote = await createNote(ndk, 'TOP NOTE (Branching Thread)', originalPoster.signer)
+		const participantB = participants[1] // Get second participant for A-B thread
+		const topNote = await createNote(ndk, 'TOP NOTE (A-B Thread)', originalPoster.signer)
 		console.log('\nPublishing top note for branching thread...')
 		await publishEvent(ndk, topNote, originalPoster.signer)
 		
-		// Track all created notes for possible reply targets
-		const allNotes: NDKEvent[] = [topNote]
-		// Track relay rejections
-		const relayRejections: Record<string, number> = {}
+		// B's initial reply that everyone will reply to
+		const firstReply = await createNote(ndk, 'First reply from B', participantB.signer, topNote)
+		await publishEvent(ndk, firstReply, participantB.signer)
+		
 		// Create and publish replies
-		console.log('\nPublishing branching replies...')
+		console.log('\nPublishing alternating A-B replies...')
 		for (let i = 1; i <= TOTAL_REPLIES; i++) {
-			// Pick a participant at random
-			const participant = participants[Math.floor(Math.random() * participants.length)]
-			// Decide whether to reply to top note or a previous reply
-			let parentNote: NDKEvent
-			if (Math.random() < REPLY_TO_TOP_PROB || allNotes.length === 1) {
-				parentNote = topNote
-			} else {
-				// Pick a random previous reply as parent
-				parentNote = allNotes[Math.floor(Math.random() * (allNotes.length - 1)) + 1]
-			}
-			// Pick a random sentence
+			const participant = i % 2 === 0 ? participantB : originalPoster
 			const randomSentence = randomSentences[Math.floor(Math.random() * randomSentences.length)]
 			const replyContent = `reply ${i}: ${randomSentence}`
-			const reply = await createNote(ndk, replyContent, participant.signer, parentNote)
-			// Publish and track rejections
-			try {
-				await publishEvent(ndk, reply, participant.signer)
-				allNotes.push(reply)
-			} catch (err) {
-				// Track relay rejections by error message
-				const msg = (err && err.message) ? err.message : 'Unknown error'
-				relayRejections[msg] = (relayRejections[msg] || 0) + 1
-			}
+			const reply = await createNote(ndk, replyContent, participant.signer, firstReply)
+			await publishEvent(ndk, reply, participant.signer)
 			await new Promise(resolve => setTimeout(resolve, 2000))
 		}
 		
@@ -308,13 +291,6 @@ const main = async () => {
 		console.log(`  nostr: URI: nostr:${linearTopNoteNip19}`)
 		console.log(`  View on nostr.band: https://nostr.band/event/${linearTopNote.id}`)
 
-		// Print relay rejection summary
-		if (Object.keys(relayRejections).length > 0) {
-			console.log('\nRelay rejections summary:')
-			for (const [reason, count] of Object.entries(relayRejections)) {
-				console.log(`  ${reason}: ${count} times`)
-			}
-		}
 		// Wait a bit before exiting to ensure all events are processed
 		await new Promise(resolve => setTimeout(resolve, 3000))
 	} catch (error) {
